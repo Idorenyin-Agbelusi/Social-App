@@ -14,6 +14,11 @@ const userSchema = new Schema({
     timestamps: true
 })
 
+userSchema.index(
+    {first_name: 'text', last_name: 'text', username: 'text', email: 'text'},
+    {name: "UserSearchIndex"}
+)
+
 userSchema.pre(
     'save',
     async function(){

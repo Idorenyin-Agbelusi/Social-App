@@ -1,6 +1,42 @@
 import Follow from "../models/follow.js";
 import User from "../models/user.js";
 
+export const GetUserList = async(req, res, next) => {
+  try{
+    const{ searchTerm } = req.query;
+
+    const filter = {}
+    if(searchTerm){
+        const trimmedSearch = searchTerm.trim();        
+        filter.$text = {$search: trimmedSearch};
+    }
+
+    const users = await User.find(filter);
+
+    return res.json({
+      users
+    })
+
+  }catch(error){
+    next(error)
+  }
+}
+
+export const GetNetworkCount = async(req, res, next) => {
+  try{
+    const userId = req.user._id;
+
+    const followingCount = await Follow.countDocuments({ followerId: userId });
+    const followersCount = await Follow.countDocuments({ followingId: userId });
+    return res.json({
+      followersCount,
+      followingCount
+    })
+  }catch(error){
+    next(error)
+  }
+}
+
 // Toggle Follow / Unfollow
 export const ToggleFollowUser = async (req, res) => {
   try {
@@ -101,3 +137,4 @@ export const GetFollowersList = async (req, res) => {
     return res.status(500).json({ status: "error", message: error.message });
   }
 };
+

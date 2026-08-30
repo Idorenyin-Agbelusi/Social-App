@@ -8,11 +8,24 @@ document.getElementById('searchInput').addEventListener('keydown', (event) => {
 
     // Trigger your fetch logic based on the active tab
     if (typeof currentActiveTab !== 'undefined' && currentActiveTab === 'following') {
-      fetchFollowingFeed();
+      fetchFollowingList();
     } else {
       fetchPosts();
     }
   }
+});
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // 1. Initialize authentication UI state
+  updateAuthUI();
+
+  // 2. Fetch following IDs FIRST if logged in
+  if (localStorage.getItem('token')) {
+    await updateFollowCounts(); 
+  }
+
+  // 3. Render posts only after follow IDs are populated
+  fetchPosts();
 });
 
 // Fetch posts from backend API
@@ -154,16 +167,19 @@ async function handleLogin(e) {
     if (!res.ok) throw new Error(data.message || 'Login failed');
 
     localStorage.setItem('token', data.token);
+    localStorage.setItem('userId', data.user._id || data.user.id);
     if (data.user && data.user.username) {
       localStorage.setItem('username', data.user.username);
     } else if (data.username) {
       localStorage.setItem('username', data.username);
     }
 
-    toggleAuthModal();
     updateAuthUI();
+    toggleAuthModal();
+    
     fetchPosts();
     fetchMyPosts();
+    updateFollowCounts();
   } catch (err) {
     alert(err.message);
   }
@@ -275,6 +291,8 @@ function updateAuthUI() {
 function handleLogout() {
   localStorage.removeItem('token');
   localStorage.removeItem('username');
+  localStorage.removeItem('userId');
+  myFollowingIds.clear();
   updateAuthUI();
   fetchPosts();
 }
@@ -505,6 +523,7 @@ async function submitComment(postId) {
 
 // --- Pill Navigation Tab Switching ---
 let currentActiveTab = 'all';
+let myFollowingIds = new Set();
 
 function switchFeedTab(tab) {
   currentActiveTab = tab;
@@ -527,7 +546,7 @@ function switchFeedTab(tab) {
   if (tab === 'all') {
     fetchPosts();
   } else if (tab === 'following') {
-    fetchFollowingFeed();
+    fetchFollowingList();
   } else if (tab === 'followers') {
     fetchFollowersList();
   }
@@ -549,7 +568,7 @@ function handleUserSearch(event) {
   // Debounce API calls by 300ms
   searchDebounceTimeout = setTimeout(async () => {
     try {
-      const res = await apiClient(`/users/search?q=${query}`);
+      const res = await apiClient(`/users?searchTerm=${query}`);
       const data = await res.json();
 
       if (!res.ok || !data.users || data.users.length === 0) {
@@ -558,17 +577,7 @@ function handleUserSearch(event) {
         return;
       }
 
-      dropdown.innerHTML = data.users.map(user => `
-        <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg border-b border-gray-100 text-xs">
-          <div>
-            <p class="font-bold text-gray-800">${user.first_name || ''} ${user.last_name || ''}</p>
-            <p class="text-gray-500">@${user.username}</p>
-          </div>
-          <button onclick="toggleFollowUser('${user._id}')" class="px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded-md font-medium hover:bg-indigo-100">
-            Follow
-          </button>
-        </div>
-      `).join('');
+      dropdown.innerHTML = data.users.map(user => renderUserRow(user)).join('');
 
       dropdown.classList.remove('hidden');
     } catch (err) {
@@ -589,6 +598,154 @@ async function fetchUserNetworkCounts() {
   } catch (err) {
     // Fallback if endpoint is unavailable
   }
+}
+
+// ==================== FOLLOW / UNFOLLOW LOGIC ====================
+
+// Toggle Follow/Unfollow API Request
+async function toggleFollowUser(targetUserId) {
+  try {
+    const res = await apiClient(`/users/${targetUserId}/follow`, { method: 'POST' });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message || 'Could not update follow status');
+
+    // Update local set of followed IDs
+    if (data.isFollowing) {
+      myFollowingIds.add(targetUserId);
+    } else {
+      myFollowingIds.delete(targetUserId);
+    }
+
+    // Refresh count badges and current tab view
+    await updateFollowCounts();
+    if (currentActiveTab === 'following') fetchFollowingList();
+    if (currentActiveTab === 'followers') fetchFollowersList();
+
+    // Re-render user search dropdown if open
+    const searchInput = document.getElementById('userSearchInput');
+    if (searchInput && searchInput.value.trim()) {
+      handleUserSearch({ target: searchInput });
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// Fetch total count badges for top bar
+async function updateFollowCounts() {
+  const token = localStorage.getItem('token');
+  if (!token) return;
+
+  try {
+    const [followingRes, followersRes] = await Promise.all([
+      apiClient('/users/following'),
+      apiClient('/users/followers')
+    ]);
+
+    const followingData = await followingRes.json();
+    const followersData = await followersRes.json();
+    const followingResStatus = followingRes.ok;
+    debugger;
+
+    if (followingRes.ok) {
+      document.getElementById('followingCountBadge').innerText = followingData.count || 0;
+      // Store current user's followed IDs for quick UI lookup
+      myFollowingIds = new Set((followingData.users || []).map(u => u._id));
+    }
+
+    if (followersRes.ok) {
+      document.getElementById('followersCountBadge').innerText = followersData.count || 0;
+    }
+  } catch (err) {
+    console.error('Failed to load follow badges:', err);
+  }
+}
+
+// ==================== TAB SWITCHING & LIST RENDERING ====================
+// Render Users I Follow
+async function fetchFollowingList() {
+  const feed = document.getElementById('postsFeed');
+  try {
+    const res = await apiClient('/users/following');
+    const data = await res.json();
+
+    if (!data.users || data.users.length === 0) {
+      feed.innerHTML = `<div class="text-center py-8 text-gray-500">You are not following anyone yet.</div>`;
+      return;
+    }
+
+    feed.innerHTML = `
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+        <h3 class="text-base font-bold text-gray-800 mb-3">People You Follow (${data.count})</h3>
+        <div class="divide-y divide-gray-100">
+          ${data.users.map(user => renderUserRow(user)).join('')}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    feed.innerHTML = `<div class="text-center py-8 text-red-500">Failed to load following list.</div>`;
+  }
+}
+
+// Render Users Following Me
+async function fetchFollowersList() {
+  const feed = document.getElementById('postsFeed');
+  try {
+    const res = await apiClient('/users/followers');
+    const data = await res.json();
+
+    if (!data.users || data.users.length === 0) {
+      feed.innerHTML = `<div class="text-center py-8 text-gray-500">You don't have any followers yet.</div>`;
+      return;
+    }
+
+    feed.innerHTML = `
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+        <h3 class="text-base font-bold text-gray-800 mb-3">Your Followers (${data.count})</h3>
+        <div class="divide-y divide-gray-100">
+          ${data.users.map(user => renderUserRow(user)).join('')}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    feed.innerHTML = `<div class="text-center py-8 text-red-500">Failed to load followers list.</div>`;
+  }
+}
+
+// Reusable user card component with dynamic follow button
+function renderUserRow(user) {
+  const currentUserId = localStorage.getItem('userId');
+  const isSelf = user._id === currentUserId;
+  const isFollowing = myFollowingIds.has(user._id);
+   debugger;
+  console.log(currentUserId);
+  console.log(user._id);
+  console.log(isSelf);
+  console.log(isFollowing);
+  console.log(myFollowingIds);
+  
+  
+
+  return `
+    <div class="flex items-center justify-between py-3">
+      <div>
+        <div class="font-bold text-sm text-gray-900">${user.first_name || ''} ${user.last_name || ''}</div>
+        <div class="text-xs text-gray-500">@${user.username}</div>
+      </div>
+      
+      ${!isSelf ? `
+        <button onclick="toggleFollowUser('${user._id}')" 
+                class="px-3 py-1 rounded-full text-xs font-semibold transition ${
+                  isFollowing 
+                    ? 'bg-gray-100 border border-gray-300 text-gray-700 hover:bg-red-50 hover:text-red-600 hover:border-red-300' 
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }">
+          ${isFollowing ? 'UnFollow' : '+ Follow'}
+        </button>
+      ` : '<span class="text-xs text-gray-400 font-medium">You</span>'}
+    </div>
+  `;
 }
 
 // Initial UI Auth state check
