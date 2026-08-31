@@ -70,7 +70,6 @@ passport.use( new JwtStrategy(
                 console.log("invalid auth");                
                 return done(null, false);
             }
-            console.log(loggedInUser);
             
             const userWithoutPassword = loggedInUser.toObject();
             delete userWithoutPassword.password;

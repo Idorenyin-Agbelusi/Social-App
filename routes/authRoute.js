@@ -19,11 +19,11 @@ authRouter.post(
             return res.status(400).json({
                 message: info?.message || 'Signup failed'
             });
-        }
+        }       
 
         res.status(201).json({
             message: "Signup successful",
-            user: req.user
+            user: user
         });
     })(req, res, next);
 });
