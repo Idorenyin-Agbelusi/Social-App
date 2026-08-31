@@ -646,7 +646,6 @@ async function updateFollowCounts() {
     const followingData = await followingRes.json();
     const followersData = await followersRes.json();
     const followingResStatus = followingRes.ok;
-    debugger;
 
     if (followingRes.ok) {
       document.getElementById('followingCountBadge').innerText = followingData.count || 0;
@@ -718,7 +717,7 @@ function renderUserRow(user) {
   const currentUserId = localStorage.getItem('userId');
   const isSelf = user._id === currentUserId;
   const isFollowing = myFollowingIds.has(user._id);
-   debugger;
+
   console.log(currentUserId);
   console.log(user._id);
   console.log(isSelf);
