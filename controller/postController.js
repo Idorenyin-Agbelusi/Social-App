@@ -1,6 +1,7 @@
 import post from "../models/post.js";
 import postLike from "../models/postLike.js"
 import postComment from "../models/postComment.js";
+import mongoose from 'mongoose';
 
 export const CreatePost = async(req, res, next) => {
     try{
@@ -39,7 +40,7 @@ export const CreatePost = async(req, res, next) => {
 }
 
 export const GetAllPublishedPosts = async(req, res, next) => {
-    try{       
+    try{    
         const{
             page = 1,
             pageLenght = 20,
